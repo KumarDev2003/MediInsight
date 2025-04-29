@@ -19,6 +19,8 @@ const JWT_SECRET = 'simple_secret_key'; // Hardcoded secret for simplicity
 
 const genAI = new GoogleGenAI({ apiKey: "AIzaSyC9zcPnEx6kHVhyn2jEzJtAd4spFMq83iI" });
 
+const _dirname = path.resolve(); 
+
 let imagePath = "test1.png"; 
 const outputPath = "output.txt";
 
@@ -34,9 +36,9 @@ app.use(cookieParser());    // Parse cookies
 const upload = multer({ storage: multer.memoryStorage() });
 
 
-app.get('/', (req, res) => {
-  res.redirect('/sign-in'); 
-});
+// app.get('/', (req, res) => {
+//   res.redirect('/sign-in'); 
+// });
 
 app.get('/getInfo', async (req, res) => {
   try {
@@ -1015,6 +1017,18 @@ function cleanJSON(rawString) {
   return cleanString;
 }
 
+// Serve static files from the frontend build directory
+app.use(express.static(path.join(_dirname, '/Frontend/dist')));
+
+// Catch-all route to handle other frontend routes
+// Compute your project root (MediInsight)
+const projectRoot = path.resolve(__dirname, '..');
+
+app.use('/', express.static(path.join(projectRoot, 'Frontend', 'dist')));
+
+app.get(/.*/, (req, res) => {
+  res.sendFile(path.join(projectRoot, 'Frontend', 'dist', 'index.html'));
+});
 
 app.listen(3000, () => {
   console.log('Server is running on port 3000');

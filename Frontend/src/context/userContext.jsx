@@ -1,47 +1,44 @@
+// src/context/userContext.js
+
 import React, { createContext, useState, useEffect } from 'react';
 import axios from 'axios';
+
+// ▶️ Make axios send your httpOnly authToken cookie on every request:
+axios.defaults.withCredentials = true;
 
 export const ReportsContext = createContext();
 
 const UserContextProvider = ({ children }) => {
-    const [reports, setReports] = useState(null);
-    const [userData, setUserData] = useState(null);
+  const [reports, setReports]   = useState(null);
+  const [userData, setUserData] = useState(null);
 
-    useEffect(() => {
-        // Read authToken from cookies instead of localStorage
-        const cookieStr = document.cookie; 
-        const token = cookieStr
-          .split('; ')
-          .find(row => row.startsWith('authToken='))
-          ?.split('=')[1];
-        console.log('Extracted authToken:', token); // Log the extracted token
+  useEffect(() => {
+    // 1️⃣ Get the logged‐in user and their reports
+    axios.get('/api/home')
+      .then(res => {
+        if (res.data.loggedIn) {
+          setUserData(res.data.user);
+        }
+      })
+      .catch(err => console.error('Error fetching user data:', err));
 
-        // Fetch reports from /api/genAI
-        axios.get('/api/genAI', { headers: { Authorization: `Bearer ${token}` } })
-            .then(response => {
-                console.log('Fetched reports:', response.data); // Log fetched reports
-                setReports(response.data);
-            })
-            .catch(error => {
-                console.error('Error fetching reports:', error);
-            });
+    // 2️⃣ Fetch your GenAI analysis (or whatever /api/genAI returns)
+    axios.get('/api/genAI')
+      .then(res => setReports(res.data))
+      .catch(err => console.error('Error fetching AI reports:', err));
+  }, []);
 
-        // Fetch user data from /api/home
-        axios.get('/api/home', { headers: { Authorization: `Bearer ${token}` } })
-            .then(response => {
-                console.log('Fetched user data:', response.data); // Log fetched user data
-                setUserData(response.data.user);
-            })
-            .catch(error => {
-                console.error('Error fetching user data:', error);
-            });
-    }, []);
-
-    return (
-        <ReportsContext.Provider value={{ reports, userData, doctors: userData?.doctors || [] }}>
-            {children}
-        </ReportsContext.Provider>
-    );
+  return (
+    <ReportsContext.Provider
+      value={{
+        reports,
+        userData,
+        doctors: userData?.doctors || []
+      }}
+    >
+      {children}
+    </ReportsContext.Provider>
+  );
 };
 
 export default UserContextProvider;
