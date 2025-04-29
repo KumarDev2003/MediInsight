@@ -1,0 +1,1021 @@
+const express = require('express');
+const app = express();
+
+const Tesseract = require('tesseract.js');
+const fs = require('fs');
+const { GoogleGenAI } = require('@google/genai');
+const path = require('path');
+const reportModel = require('./models/reportModel');
+const bodyParser = require('body-parser');
+const userModel = require('./models/userModel');
+const cookieParser = require('cookie-parser');
+const jwt = require('jsonwebtoken');
+const multer = require('multer');
+const pdf2img = require('pdf-poppler'); // Import pdf-poppler for PDF to image conversion
+
+const drModel = require('./models/drModel'); // Import the doctor model
+
+const JWT_SECRET = 'simple_secret_key'; // Hardcoded secret for simplicity
+
+const genAI = new GoogleGenAI({ apiKey: "AIzaSyC9zcPnEx6kHVhyn2jEzJtAd4spFMq83iI" });
+
+let imagePath = "test1.png"; 
+const outputPath = "output.txt";
+
+const tempDir = path.join(__dirname, 'temp'); // Define the temp directory path
+if (!fs.existsSync(tempDir)) {
+  fs.mkdirSync(tempDir, { recursive: true }); // Create the temp directory if it doesn't exist
+}
+
+app.use(bodyParser.json()); // Parse JSON request bodies
+app.use(cookieParser());    // Parse cookies
+
+// Configure Multer to use memory storage (files remain in memory and not saved to disk)
+const upload = multer({ storage: multer.memoryStorage() });
+
+
+app.get('/', (req, res) => {
+  res.redirect('/sign-in'); 
+});
+
+app.get('/getInfo', async (req, res) => {
+  try {
+    const token = req.cookies.authToken; // Get the token from cookies
+    if (!token) {
+      return res.status(401).send({ message: 'Unauthorized: No token provided' });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET); // Verify the token
+    const user = await userModel.findById(decoded.id); // Find the logged-in user
+    if (!user) {
+      return res.status(404).send({ message: 'User not found' });
+    }
+
+    // Process a pre-defined image file using Tesseract
+    Tesseract.recognize(imagePath, 'eng', {
+      logger: () => {} // Disable logging to the terminal
+    }).then(async ({ data: { text } }) => {
+      console.log(text);
+      const report = await reportModel.create({ text }); // Create a new report
+      user.reports.push(report._id); // Add the report ID to the user's reports field
+      await user.save(); // Save the updated user document
+
+      res.send({ message: 'Text extraction completed and report added to user', reportId: report._id });
+    }).catch(err => {
+      res.status(500).send({ message: 'Error processing the image', error: err });
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: 'Error in /getInfo route', error });
+  }
+});
+
+// 1 attempt
+// app.get('/api/genAI', async (req, res) => {
+//   try {
+//     console.log('Request received at /api/genAI'); // Log route entry
+
+//     const token = req.cookies.authToken; // Get the token from cookies
+//     console.log('Cookies:', req.cookies); // Log cookies for debugging
+
+//     if (!token) {
+//       console.warn('No token provided in cookies.');
+//       return res.status(401).send({ message: 'Unauthorized: No token provided' });
+//     }
+
+//     console.log('Extracted token:', token); // Log the extracted token
+
+//     const decoded = jwt.verify(token, JWT_SECRET); // Verify the token
+//     console.log('Decoded token:', decoded); // Log decoded token data
+
+//     const user = await userModel.findById(decoded.id); // Find the logged-in user
+//     if (!user) {
+//       console.warn('User not found for ID:', decoded.id);
+//       return res.status(404).send({ message: 'User not found' });
+//     }
+
+//     console.log('Fetched user data:', user); // Log user data
+
+//     const reports = await reportModel.find({ _id: { $in: user.reports } }); // Find reports by IDs
+//     console.log('Fetched reports:', reports); // Log fetched reports
+
+//     const fileData = reports.map(report => report.text).join(' '); // Concatenate text from reports
+//     console.log('Concatenated report text:', fileData); // Log concatenated report text
+
+//     if (!fileData) {
+//       console.warn('No report text available for analysis.');
+//       return res.status(400).send({ message: 'No report text available for analysis' });
+//     }
+
+//     // Use genAI to generate report analysis
+//     console.log('Sending data to genAI for analysis...');
+//     const response = await genAI.models.generateContent({
+//       model: 'gemini-2.0-flash-001',
+//       contents: `You are a medical data analyst. Below is a detailed medical report containing lab results, diagnostic imaging findings, and clinical notes. 
+//       Please do the following:
+//        1. Summarize the key findings in clear bullet points.
+//        2. Identify any abnormal results or trends that indicate the patient's condition is either improving or worsening.
+//        3. Highlight any critical points that need immediate attention.
+//        4. Recommend potential follow-up actions or tests, if applicable.
+//        Note: Provide the data in json format & give all the four points in the form of array of text.
+//       Report Text: ${fileData}`,
+//     });
+
+//     console.log('genAI response:', response.text); // Log raw response from genAI
+
+//     res.json(response.text); // Send the response directly as JSON
+//     console.log('Response sent successfully.'); // Log successful response
+//   } catch (error) {
+//     console.error('Error in /api/genAI route:', error); // Log error details
+//     res.status(500).json({ error: 'Error generating content' });
+//   }
+// });
+
+// 3 attempt
+app.get('/api/genAI', async (req, res) => {
+  try {
+    console.log('Request received at /api/genAI');
+
+    const token = req.cookies.authToken;
+    console.log('Cookies:', req.cookies);
+
+    if (!token) {
+      console.warn('No token provided in cookies.');
+      return res.status(401).send({ message: 'Unauthorized: No token provided' });
+    }
+
+    console.log('Extracted token:', token);
+    const decoded = jwt.verify(token, JWT_SECRET);
+    console.log('Decoded token:', decoded);
+
+    const user = await userModel.findById(decoded.id);
+    if (!user) {
+      console.warn('User not found for ID:', decoded.id);
+      return res.status(404).send({ message: 'User not found' });
+    }
+    console.log('Fetched user data:', user);
+
+    const reports = await reportModel.find({ _id: { $in: user.reports } });
+    console.log('Fetched reports:', reports);
+
+    const fileData = reports.map(r => r.text).join(' ');
+    console.log('Concatenated report text length:', fileData.length);
+
+    if (!fileData) {
+      console.warn('No report text available for analysis.');
+      return res.status(400).send({ message: 'No report text available for analysis' });
+    }
+
+    // Prepare the prompt once
+    const prompt = `You are a medical data analyst. Below is a detailed medical report containing lab results, diagnostic imaging findings, and clinical notes.
+Please do the following:
+  1. Summarize the key findings in clear bullet points.
+  2. Identify any abnormal results or trends that indicate the patient's condition is either improving or worsening.
+  3. Highlight any critical points that need immediate attention.
+  4. Recommend potential follow-up actions or tests, if applicable.
+Note: Provide the data in JSON format & give all four points as arrays of text.
+Report Text: ${fileData}`;
+
+    // Retry loop
+    let aiResponse = null;
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        console.log(`genAI attempt ${attempt}...`);
+        aiResponse = await genAI.models.generateContent({
+          model: 'gemini-2.0-flash-001',
+          contents: prompt,
+        });
+        console.log(`genAI response on attempt ${attempt}:`, aiResponse.text);
+
+        // If we got valid text, break out
+        if (aiResponse && aiResponse.text) {
+          break;
+        }
+      } catch (err) {
+        console.error(`Error on genAI attempt ${attempt}:`, err);
+        // Continue to next attempt
+      }
+    }
+
+    // After 5 attempts, if still no valid response
+    if (!aiResponse || !aiResponse.text) {
+      console.error('genAI did not respond after 3 attempts.');
+      return res
+        .status(502)
+        .json({ error: 'genAI did not respond after multiple attempts. Please try again later.' });
+    }
+
+    // Success: send back the AI’s JSON text
+    res.json(aiResponse.text);
+    console.log('Response sent successfully.');
+    
+  } catch (error) {
+    console.error('Error in /api/genAI route:', error);
+    res.status(500).json({ error: 'Error generating content' });
+  }
+});
+
+app.post('/api/signIn', async (req, res) => {
+  let { username, email, password } = req.body;
+  const user = await userModel.create({
+    name: username,
+    email: email,
+    password: password,
+  });
+
+  const token = jwt.sign({ id: user._id, email: user.email }, JWT_SECRET);
+
+  // #
+  res.cookie('authToken', token, { httpOnly: true }); // Use 'token' for both users and doctors
+
+  res.status(200).send({ message: 'Sign-in data received successfully' });
+});
+
+app.post('/api/logIn', async (req, res) => {
+  let { email, password } = req.body;
+  const user = await userModel.findOne({ email: email, password: password });
+  if (!user) {
+    return res.status(401).send({ message: 'Invalid credentials' });
+  }
+
+  const token = jwt.sign({ id: user._id, email: user.email }, JWT_SECRET);
+
+  // #
+  res.cookie('authToken', token, { httpOnly: true }); // Use 'token' for both users and doctors
+
+  res.status(200).send({ message: 'Logged-in data received successfully' });
+});
+
+app.get('/api/logout', async (req, res) => {
+  try {
+    res.clearCookie('authToken'); // Clear the authentication token cookie
+    res.status(200).send({ message: 'Logged out successfully', redirect: '/sign-in' });
+  } catch (error) {
+    console.error('Error in /api/logout route:', error);
+    res.status(500).send({ message: 'Error logging out', error });
+  }
+});
+
+app.get('/api/home', async (req, res) => {
+  try {
+    const token = req.cookies.authToken; // Use 'authToken' for users
+    if (!token) {
+      return res.status(200).send({ loggedIn: false, message: 'Unauthorized: No token provided' });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const user = await userModel
+      .findById(decoded.id)
+      .populate('reports')
+      .populate('doctors');
+    if (!user) {
+      return res.status(200).send({ loggedIn: false, message: 'User not found' });
+    }
+
+    const reports = user.reports.map(report => ({
+      ...report.toJSON(),
+      photo: report.photo ? `data:image/png;base64,${report.photo.toString('base64')}` : null
+    }));
+
+    res.status(200).send({
+      loggedIn: true,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        reports,
+        doctors: user.doctors,
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ loggedIn: false, message: 'Error in /api/home route', error });
+  }
+});
+
+app.post('/api/uploadReport', upload.single('report'), async (req, res) => {
+  try {
+    // Get the token from cookies
+    const token = req.cookies.authToken;
+    if (!token) {
+      return res.status(401).send({ message: 'Unauthorized: No token provided' });
+    }
+
+    // Verify token and decode user info
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const user = await userModel.findById(decoded.id);
+    if (!user) {
+      return res.status(404).send({ message: 'User not found' });
+    }
+
+    // Validate if a file is uploaded
+    if (!req.file) {
+      return res.status(400).send({ message: 'No file uploaded' });
+    }
+
+    const mimeType = req.file.mimetype;
+
+    if (mimeType === 'application/pdf') {
+      // Handle PDF upload
+      const tempPdfPath = path.join(tempDir, `${Date.now()}-uploaded.pdf`);
+      fs.writeFileSync(tempPdfPath, req.file.buffer);
+
+      const outputDir = path.join(tempDir, `${Date.now()}-images`);
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
+
+      const options = {
+        format: 'png',
+        out_dir: outputDir,
+        out_prefix: 'page',
+        page: null, // Convert all pages
+      };
+
+      await pdf2img.convert(tempPdfPath, options);
+
+      const imageFiles = fs.readdirSync(outputDir).filter(file => file.endsWith('.png'));
+      const reports = [];
+
+      for (const imageFile of imageFiles) {
+        const imagePath = path.join(outputDir, imageFile);
+        const imageBuffer = fs.readFileSync(imagePath);
+
+        // Extract text from the image using Tesseract
+        const { data: { text } } = await Tesseract.recognize(imageBuffer, 'eng', {
+          logger: () => {}, // Disable logging
+        });
+
+        // Create a new report storing text and image buffer
+        const report = await reportModel.create({
+          text,
+          photo: imageBuffer,
+        });
+
+        user.reports.push(report._id);
+        reports.push(report);
+      }
+
+      await user.save();
+
+      // Clean up temporary files
+      fs.unlinkSync(tempPdfPath);
+      fs.rmdirSync(outputDir, { recursive: true });
+
+      return res.status(200).send({
+        message: 'PDF uploaded, converted to images, and processed successfully',
+        reportIds: reports.map(report => report._id),
+      });
+    } else if (mimeType.startsWith('image/')) {
+      // Handle image upload
+      const photoBuffer = req.file.buffer;
+
+      const { data: { text } } = await Tesseract.recognize(photoBuffer, 'eng', {
+        logger: () => {}, // Disable logging
+      });
+
+      const report = await reportModel.create({
+        text,
+        photo: photoBuffer,
+      });
+
+      user.reports.push(report._id);
+      await user.save();
+
+      return res.status(200).send({
+        message: 'Image uploaded and processed successfully',
+        reportId: report._id,
+      });
+    } else {
+      return res.status(400).send({ message: 'Unsupported file type. Only images and PDFs are allowed.' });
+    }
+  } catch (error) {
+    console.error('Error in /api/uploadReport route:', error);
+    res.status(500).send({ message: 'Error in /api/uploadReport route', error });
+  }
+});
+
+app.post('/api/uploadPdf', upload.single('pdf'), async (req, res) => {
+  try {
+    // Get the token from cookies
+    const token = req.cookies.authToken;
+    if (!token) {
+      return res.status(401).send({ message: 'Unauthorized: No token provided' });
+    }
+
+    // Verify token and decode user info
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const user = await userModel.findById(decoded.id);
+    if (!user) {
+      return res.status(404).send({ message: 'User not found' });
+    }
+
+    // Validate if a file is uploaded
+    if (!req.file) {
+      return res.status(400).send({ message: 'No file uploaded' });
+    }
+
+    // Validate file type (only allow PDFs)
+    if (req.file.mimetype !== 'application/pdf') {
+      return res.status(400).send({ message: 'Invalid file type. Only PDFs are allowed.' });
+    }
+
+    // Save the uploaded PDF temporarily
+    const tempPdfPath = path.join(__dirname, 'temp', req.file.originalname);
+    fs.writeFileSync(tempPdfPath, req.file.buffer);
+
+    // Convert PDF to images
+    const outputDir = path.join(__dirname, 'temp', 'images');
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    const options = {
+      format: 'png',
+      out_dir: outputDir,
+      out_prefix: path.basename(tempPdfPath, path.extname(tempPdfPath)),
+      page: null, // Convert all pages
+    };
+
+    await pdf2img.convert(tempPdfPath, options);
+
+    // Process each generated image
+    const imageFiles = fs.readdirSync(outputDir).filter(file => file.endsWith('.png'));
+    const reports = [];
+
+    for (const imageFile of imageFiles) {
+      const imagePath = path.join(outputDir, imageFile);
+      const imageBuffer = fs.readFileSync(imagePath);
+
+      // Extract text from the image using Tesseract
+      const { data: { text } } = await Tesseract.recognize(imageBuffer, 'eng', {
+        logger: () => {}, // Disable logging
+      });
+
+      // Create a new report storing text and image buffer
+      const report = await reportModel.create({
+        text,
+        photo: imageBuffer, // Save the image buffer directly in MongoDB
+      });
+
+      // Associate the created report with the user
+      user.reports.push(report._id);
+      reports.push(report);
+    }
+
+    await user.save();
+
+    // Clean up temporary files
+    fs.unlinkSync(tempPdfPath);
+    fs.rmdirSync(outputDir, { recursive: true });
+
+    res.status(200).send({
+      message: 'PDF uploaded, converted to images, and processed successfully',
+      reportIds: reports.map(report => report._id),
+    });
+  } catch (error) {
+    console.error('Error in /api/uploadPdf route:', error);
+    res.status(500).send({ message: 'Error in /api/uploadPdf route', error });
+  }
+});
+
+// Report deletion ke liye hai
+app.delete('/api/delete/:id', async (req, res) => {
+  try {
+    console.log('Received Data:', req.params); // Log the received data
+    await reportModel.findByIdAndDelete(req.params.id);
+    res.status(200).json({ message: 'Report deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting report:', error);
+    res.status(500).json({ message: 'Failed to delete report' });
+  }
+});
+
+app.get('/api/removeDoc/:id', async (req, res) => {
+  try {
+    const token = req.cookies.authToken; // Get the token from cookies
+    if (!token) {
+      return res.status(401).send({ message: 'Unauthorized: No token provided' });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET); // Verify the token
+    const user = await userModel.findById(decoded.id); // Find the logged-in user
+    if (!user) {
+      return res.status(404).send({ message: 'User not found' });
+    }
+
+    const doctorId = req.params.id; // Get the doctor ID from the request params
+    const doctor = await drModel.findById(doctorId); // Find the doctor by ID
+    if (!doctor) {
+      return res.status(404).send({ message: 'Doctor not found' });
+    }
+
+    // Remove the doctor from the user's doctors list
+    user.doctors = user.doctors.filter(docId => docId.toString() !== doctorId);
+    await user.save();
+
+    // Remove the user from the doctor's patients list
+    doctor.patients = doctor.patients.filter(patientId => patientId.toString() !== user._id.toString());
+    await doctor.save();
+
+    res.status(200).send({ message: 'Doctor removed successfully' });
+  } catch (error) {
+    console.error('Error in /api/removeDoc route:', error);
+    res.status(500).send({ message: 'Error removing doctor', error });
+  }
+});
+
+app.get('/api/allDoctors', async (req, res) => {
+  try {
+    const doctors = await drModel.find();
+    res.status(200).json(doctors);
+  } catch (error) {
+    console.error('Error fetching doctors:', error);
+    res.status(500).json({ message: 'Failed to fetch doctors' });
+  }
+})
+
+app.post('/api/addDoc/:id', async (req, res) => {
+  try {
+    const token = req.cookies.authToken;
+    if (!token) {
+      return res.status(401).send({ message: 'Unauthorized: No token provided' });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    const user = await userModel.findById(decoded.id).populate('reports');
+    if (!user) {
+      return res.status(404).send({ message: 'User not found' });
+    }
+
+    const doctorId = req.params.id;
+    const doctor = await drModel.findById(doctorId);
+    if (!doctor) {
+      return res.status(404).send({ message: 'Doctor not found' });
+    }
+
+    // Add doctor to user's doctors list if not already there
+    if (!user.doctors.includes(doctorId)) {
+      user.doctors.push(doctorId);
+    }
+
+    // Add user to doctor's patients list if not already there
+    if (!doctor.patients.includes(user._id)) {
+      doctor.patients.push(user._id);
+    }
+
+    await user.save();
+    await doctor.save();
+
+    res.status(200).send({
+      message: 'Doctor added successfully',
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        reports: user.reports,
+        doctors: user.doctors,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: 'Error in /api/addDoc route', error });
+  }
+});
+
+app.post('/api/mediDecode', upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).send({ message: 'No file uploaded' });
+    }
+
+    const imageBuffer = req.file.buffer;
+
+    // Extract text from the image using Tesseract
+    Tesseract.recognize(imageBuffer, 'eng', {
+      logger: () => {}, // Disable logging
+    }).then(async ({ data: { text } }) => {
+      console.log('Extracted Text:', text);
+
+      // Generate response using genAI
+      const response = await genAI.models.generateContent({
+        model: 'gemini-2.0-flash-001',
+        contents: `You are a pharmaceutical information specialist.  
+        Given the following extracted text from a medicine label, identify and return the information below in JSON format. If a field is not explicitly stated, infer the most likely value based on standard pharmaceutical knowledge; if truly unknowable, set its value to null.
+ 
+        Note: 
+        1. Do not completely rely on the extracted text , Identify the medicine name and search for the information on the internet.
+        2. The information should be relveant to the Indian market.
+        3. Give the data in easy words.
+
+        Medicine Text:
+        “${text}”
+
+        Required Fields:
+        1. **brand_name**: The marketed trade name of the medicine.  
+        2. **generic_name**: The official generic (INN) name.  
+        3. **salt_name**: The active pharmaceutical ingredient(s).  
+        4. **dosage_form**: e.g. tablet, capsule, syrup, injection.  
+        5. **strength**: e.g. “500 mg”, “250 mcg/mL”.  
+        6. **recommended_dosage**: Typical adult and pediatric dosing guidelines.  
+        7. **indications**: Approved clinical uses or conditions treated.  
+        8. **contraindications**: Major situations or patient groups who should not take it.  
+        9. **common_side_effects**: List of the most frequently reported adverse effects.  
+        10. **storage_instructions**: Temperature, light, humidity requirements.  
+        11. **manufacturer**: Name of the pharmaceutical company.  
+        12. **approximate_price_range**: Typical retail cost for a standard pack or course (in local currency).  
+        13. **cheapest_generic_options**: Any lower‐cost generic alternatives or equivalent INN brands.  
+        14. **additional_notes**: Any extra relevant info (e.g. pregnancy category, drug interactions, patient tips).
+        15. **food_suggestions**: Any food or drink for health benefits or to avoid while taking the medicine.`,
+      });
+
+      console.log('Generated Response:', response.text);
+      res.status(200).send({ analysis: response.text });
+    }).catch((err) => {
+      console.error('Tesseract error:', err);
+      res.status(500).send({ message: 'Error processing the image', error: err });
+    });
+  } catch (error) {
+    console.error('Error in /api/mediDecode route:', error);
+    res.status(500).send({ message: 'Error in /api/mediDecode route', error });
+  }
+});
+
+app.post('/api/prescriptionDecode', upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).send({ message: 'No file uploaded' });
+    }
+
+    const imageBuffer = req.file.buffer;
+
+    // Extract text from the image using Tesseract
+    Tesseract.recognize(imageBuffer, 'eng', {
+      logger: () => {}, // Disable logging
+    }).then(async ({ data: { text } }) => {
+      console.log('Extracted Text:', text);
+
+      // Generate response using genAI
+      const response = await genAI.models.generateContent({
+        model: 'gemini-2.0-flash-001',
+        contents: `Please provide a concise summary of the following prescription text, listing only the prescribed medications with their strength, dosage, route, frequency, duration, and any patient instructions.
+
+        Prescription Text:
+        “${text}”`,
+      });
+
+      console.log('Generated Response:', response.text);
+      res.status(200).send({ analysis: response.text });
+    }).catch((err) => {
+      console.error('Tesseract error:', err);
+      res.status(500).send({ message: 'Error processing the image', error: err });
+    });
+  } catch (error) {
+    console.error('Error in /api/prescriptionDecode route:', error);
+    res.status(500).send({ message: 'Error in /api/prescriptionDecode route', error });
+  }
+});
+
+// Dr
+
+app.post('/api/DrsignIn', async (req, res) => {
+  console.log('Received Data:', req.body); // Log the received data
+  let { username, email, password } = req.body;
+  const user = await drModel.create({
+    name: username,
+    email: email,
+    password: password,
+  });
+
+  const token = jwt.sign({ id: user._id, email: user.email }, JWT_SECRET);
+  res.cookie('token', token, { httpOnly: true }); // Use 'token' for both users and doctors
+  res.status(200).send({ message: 'Sign-in data received successfully' });
+})
+
+app.post('/api/DrlogIn', async (req, res) => {
+  try {
+    console.log('Received Data:', req.body); // Log the received data
+    let { email, password } = req.body;
+
+    // Find the doctor by email and password
+    const doctor = await drModel.findOne({ email: email, password: password });
+    if (!doctor) {
+      return res.status(401).send({ message: 'Invalid credentials' });
+    }
+
+    // Generate a JWT token for the doctor
+    const token = jwt.sign({ id: doctor._id, email: doctor.email }, JWT_SECRET);
+    res.cookie('token', token, { httpOnly: true }); // Use 'token' for both users and doctors
+
+    res.status(200).send({ message: 'Logged-in data received successfully' });
+  } catch (error) {
+    console.error('Error in /api/DrlogIn route:', error);
+    res.status(500).send({ message: 'Error in /api/DrlogIn route', error });
+  }
+});
+
+app.get('/api/DrHome', async (req, res) => {
+  try {
+    console.log('Cookies:', req.cookies); // Log cookies for debugging
+    const token = req.cookies.token; // Use 'token' for both users and doctors
+    console.log('Extracted token:', token); // Log the extracted token
+
+    if (!token) {
+      console.warn('No token provided in cookies.');
+      return res.status(401).send({ message: 'Unauthorized: No token provided' });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    console.log('Decoded token:', decoded); // Log decoded token data
+
+    const doctor = await drModel.findById(decoded.id).populate('patients');
+    if (!doctor) {
+      console.warn('Doctor not found for ID:', decoded.id);
+      return res.status(404).send({ message: 'Doctor not found' });
+    }
+
+    console.log('Doctor data:', doctor); // Log the doctor data
+
+    const patients = doctor.patients.map(patient => ({
+      id: patient._id,
+      name: patient.name,
+      email: patient.email,
+      reports: patient.reports,
+    }));
+
+    console.log('Patients data:', patients); // Log the patients data
+
+    res.status(200).send({
+      doctor: {
+        id: doctor._id,
+        name: doctor.name,
+        email: doctor.email,
+        patients,
+      }
+    });
+  } catch (error) {
+    console.error('Error in /api/DrHome route:', error); // Log the error
+    res.status(500).send({ message: 'Error in /api/DrHome route', error });
+  }
+})
+
+app.delete('/api/removePatient/:id', async (req, res) => {
+  try {
+    const token = req.cookies.token; // Use 'token' for both users and doctors
+    if (!token) {
+      return res.status(401).send({ message: 'Unauthorized: No token provided' });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const doctor = await drModel.findById(decoded.id);
+    if (!doctor) {
+      return res.status(404).send({ message: 'Doctor not found' });
+    }
+
+    const patientId = req.params.id;
+    const patientIndex = doctor.patients.indexOf(patientId);
+    if (patientIndex === -1) {
+      return res.status(404).send({ message: 'Patient not found' });
+    }
+
+    doctor.patients.splice(patientIndex, 1); // Remove the patient from the doctor's list
+    await doctor.save(); // Save the updated doctor document
+
+    res.status(200).send({ message: 'Patient removed successfully' });
+  } catch (error) {
+    console.error('Error removing patient:', error);
+    res.status(500).send({ message: 'Error removing patient', error });
+  }
+})
+
+app.get('/api/reports/:id', async (req, res) => {
+  try {
+    const patientId = req.params.id; // Access the patient ID from the params
+    const patient = await userModel.findById(patientId).populate('reports'); // Fetch the patient and populate reports
+
+    if (!patient) {
+      return res.status(404).send({ message: 'Patient not found' });
+    }
+
+    // Convert photo buffer to Base64 string for each report
+    const reports = patient.reports.map((report) => ({
+      ...report.toJSON(),
+      photo: report.photo ? report.photo.toString('base64') : null,
+    }));
+
+    res.status(200).send({ 
+      message: 'Reports fetched successfully', 
+      reports 
+    });
+  } catch (error) {
+    console.error('Error fetching reports:', error);
+    res.status(500).send({ message: 'Error fetching reports', error });
+  }
+});
+
+// Ye doctore ke liye hai
+
+// 1 attempt
+
+// app.get('/api/reportAnalysis/:id', async (req, res) => {
+//   try {
+//     console.log('Request received at /api/reportAnalysis/:id'); // Log route entry
+
+//     const token = req.cookies.token; // Get the token from cookies
+//     console.log('Cookies:', req.cookies); // Log cookies for debugging
+
+//     if (!token) {
+//       console.warn('No token provided in cookies.');
+//       return res.status(401).send({ message: 'Unauthorized: No token provided' });
+//     }
+
+//     console.log('Extracted token:', token); // Log the extracted token
+
+//     const decoded = jwt.verify(token, JWT_SECRET); // Verify the token
+//     console.log('Decoded token:', decoded); // Log decoded token data
+
+//     const patientId = req.params.id; // Use the patient ID from the URL
+//     console.log('Fetching patient with ID:', patientId);
+
+//     const patient = await userModel.findById(patientId).populate('reports'); // Fetch patient and populate reports
+//     if (!patient) {
+//       console.warn('Patient not found for ID:', patientId);
+//       return res.status(404).send({ message: 'Patient not found' });
+//     }
+
+//     console.log('Fetched patient data:', patient); // Log patient data
+
+//     // Concatenate all report texts into a single string
+//     const reportText = patient.reports.map(report => report.text).join(' ');
+//     console.log('Concatenated report text:', reportText); // Log concatenated report text
+
+//     if (!reportText) {
+//       console.warn('No report text available for analysis.');
+//       return res.status(400).send({ message: 'No report text available for analysis' });
+//     }
+
+//     // Use genAI to generate report analysis
+//     console.log('Sending data to genAI for analysis...');
+//     const response = await genAI.models.generateContent({
+//       model: 'gemini-2.0-flash-001',
+//       contents: `You are a medical data analyst. Below is a detailed medical report containing lab results, diagnostic imaging findings, and clinical notes. 
+//       Please do the following:
+//        1. Summarize the key findings in clear bullet points.
+//        2. Identify any abnormal results or trends that indicate the patient's condition is either improving or worsening.
+//        3. Highlight any critical points that need immediate attention.
+//        4. Recommend potential follow-up actions or tests, if applicable.
+//        Note: Provide the data in JSON format & give all the four points in the form of an array of text.
+//       Report Text: ${reportText}`,
+//     });
+
+//     console.log('genAI response:', response.text); // Log raw response from genAI
+
+//     // Clean the response by removing Markdown-style code block markers
+//     const cleanedResponse = cleanJSON(response.text);
+//     console.log('Cleaned genAI response:', cleanedResponse); // Log cleaned response
+
+//     let parsedResponse;
+//     try {
+//       parsedResponse = JSON.parse(cleanedResponse); // Parse the cleaned JSON response
+//     } catch (parseError) {
+//       console.error('Error parsing genAI response:', parseError);
+//       return res.status(500).send({ message: 'Error parsing genAI response', error: parseError });
+//     }
+
+//     console.log('Parsed genAI response:', parsedResponse); // Log parsed response
+
+//     res.status(200).send({
+//       message: 'Report analysis generated successfully',
+//       reportAnalysis: parsedResponse,
+//     });
+//     console.log('Response sent successfully.'); // Log successful response
+//   } catch (error) {
+//     console.error('Error in /api/reportAnalysis/:id route:', error); // Log error details
+//     res.status(500).send({ message: 'Error generating report analysis', error });
+//   }
+// });
+
+
+// 5 attempt
+app.get('/api/reportAnalysis/:id', async (req, res) => {
+  try {
+    console.log('Request received at /api/reportAnalysis/:id');
+
+    const token = req.cookies.token;
+    console.log('Cookies:', req.cookies);
+
+    if (!token) {
+      console.warn('No token provided in cookies.');
+      return res.status(401).send({ message: 'Unauthorized: No token provided' });
+    }
+    console.log('Extracted token:', token);
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    console.log('Decoded token:', decoded);
+
+    const patientId = req.params.id;
+    console.log('Fetching patient with ID:', patientId);
+
+    const patient = await userModel.findById(patientId).populate('reports');
+    if (!patient) {
+      console.warn('Patient not found for ID:', patientId);
+      return res.status(404).send({ message: 'Patient not found' });
+    }
+    console.log('Fetched patient data:', patient);
+
+    const reportText = patient.reports.map(r => r.text).join(' ');
+    console.log('Concatenated report text length:', reportText.length);
+
+    if (!reportText) {
+      console.warn('No report text available for analysis.');
+      return res.status(400).send({ message: 'No report text available for analysis' });
+    }
+
+    const prompt = `You are a medical data analyst. Below is a detailed medical report containing lab results, diagnostic imaging findings, and clinical notes.
+Please do the following:
+  1. Summarize the key findings in clear bullet points.
+  2. Identify any abnormal results or trends that indicate the patient's condition is either improving or worsening.
+  3. Highlight any critical points that need immediate attention.
+  4. Recommend potential follow-up actions or tests, if applicable.
+Note: Provide the data in JSON format & give all four points as arrays of text.
+Report Text: ${reportText}`;
+
+    let aiResponse = null;
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        console.log(`genAI attempt ${attempt}...`);
+        aiResponse = await genAI.models.generateContent({
+          model: 'gemini-2.0-flash-001',
+          contents: prompt,
+        });
+        console.log(`genAI response on attempt ${attempt}:`, aiResponse.text);
+
+        if (aiResponse && aiResponse.text) {
+          break;
+        }
+      } catch (err) {
+        console.error(`Error on genAI attempt ${attempt}:`, err);
+        // continue to next attempt
+      }
+    }
+
+    if (!aiResponse || !aiResponse.text) {
+      console.error('genAI did not respond after 5 attempts.');
+      return res
+        .status(502)
+        .send({ message: 'genAI did not respond after multiple attempts. Please try again later.' });
+    }
+
+    // Clean and parse the JSON
+    const cleaned = cleanJSON(aiResponse.text);
+    console.log('Cleaned genAI response:', cleaned);
+
+    let parsed;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (parseError) {
+      console.error('Error parsing genAI response:', parseError);
+      return res.status(500).send({ message: 'Error parsing genAI response', error: parseError });
+    }
+
+    console.log('Parsed genAI response:', parsed);
+    res.status(200).send({
+      message: 'Report analysis generated successfully',
+      reportAnalysis: parsed,
+    });
+    console.log('Response sent successfully.');
+
+  } catch (error) {
+    console.error('Error in /api/reportAnalysis/:id route:', error);
+    res.status(500).send({ message: 'Error generating report analysis', error });
+  }
+});
+
+
+
+// Helper function to clean Markdown formatting from a JSON string
+function cleanJSON(rawString) {
+  let cleanString = rawString.trim();
+
+  // Remove leading code fence
+  if (cleanString.startsWith("```")) {
+    const firstNewline = cleanString.indexOf("\n");
+    if (firstNewline !== -1) {
+      cleanString = cleanString.substring(firstNewline + 1);
+    }
+  }
+
+  // Remove trailing code fence
+  if (cleanString.endsWith("```")) {
+    const fenceIndex = cleanString.lastIndexOf("```");
+    cleanString = cleanString.substring(0, fenceIndex).trim();
+  }
+
+  return cleanString;
+}
+
+
+app.listen(3000, () => {
+  console.log('Server is running on port 3000');
+});

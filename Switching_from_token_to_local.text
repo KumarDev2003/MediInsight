@@ -1,0 +1,463 @@
+const express = require('express');
+const app = express();
+
+const Tesseract = require('tesseract.js');
+const fs = require('fs');
+const { GoogleGenAI } = require('@google/genai');
+const path = require('path');
+const reportModel = require('./models/reportModel');
+const bodyParser = require('body-parser');
+const userModel = require('./models/userModel');
+const cookieParser = require('cookie-parser');
+const jwt = require('jsonwebtoken');
+const multer = require('multer');
+
+const drModel = require('./models/drModel'); // Import the doctor model
+
+const JWT_SECRET = 'simple_secret_key'; // Hardcoded secret for simplicity
+
+const genAI = new GoogleGenAI({ apiKey: "AIzaSyC9zcPnEx6kHVhyn2jEzJtAd4spFMq83iI" });
+
+let imagePath = "test1.png"; 
+const outputPath = "output.txt";
+
+app.use(bodyParser.json()); // Parse JSON request bodies
+app.use(cookieParser());    // Parse cookies
+
+// Configure Multer to use memory storage (files remain in memory and not saved to disk)
+const upload = multer({ storage: multer.memoryStorage() });
+
+app.get('/', (req, res) => {
+  res.send("Hello");
+});
+
+app.get('/getInfo', async (req, res) => {
+  try {
+    const token = req.cookies.authToken; // Get the token from cookies
+    if (!token) {
+      return res.status(401).send({ message: 'Unauthorized: No token provided' });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET); // Verify the token
+    const user = await userModel.findById(decoded.id); // Find the logged-in user
+    if (!user) {
+      return res.status(404).send({ message: 'User not found' });
+    }
+
+    // Process a pre-defined image file using Tesseract
+    Tesseract.recognize(imagePath, 'eng', {
+      logger: () => {} // Disable logging to the terminal
+    }).then(async ({ data: { text } }) => {
+      console.log(text);
+      const report = await reportModel.create({ text }); // Create a new report
+      user.reports.push(report._id); // Add the report ID to the user's reports field
+      await user.save(); // Save the updated user document
+
+      res.send({ message: 'Text extraction completed and report added to user', reportId: report._id });
+    }).catch(err => {
+      res.status(500).send({ message: 'Error processing the image', error: err });
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: 'Error in /getInfo route', error });
+  }
+});
+
+app.get('/api/genAI', async (req, res) => {
+  try {
+    const token = req.cookies.authToken; // Get the token from cookies
+    if (!token) {
+      return res.status(401).send({ message: 'Unauthorized: No token provided' });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET); // Verify the token
+    const user = await userModel.findById(decoded.id); // Find the logged-in user
+    if (!user) {
+      return res.status(404).send({ message: 'User not found' });
+    }
+
+    const reports = await reportModel.find({ _id: { $in: user.reports } }); // Find reports by IDs
+    const fileData = reports.map(report => report.text).join(' '); // Concatenate text from reports
+
+    const response = await genAI.models.generateContent({
+      model: 'gemini-2.0-flash-001',
+      contents: `You are a medical data analyst. Below is a detailed medical report containing lab results, diagnostic imaging findings, and clinical notes. 
+      Please do the following:
+       1. Summarize the key findings in clear bullet points.
+       2. Identify any abnormal results or trends that indicate the patient's condition is either improving or worsening.
+       3. Highlight any critical points that need immediate attention.
+       4. Recommend potential follow-up actions or tests, if applicable.
+       Note: Provide the data in json format & give all the four points in the form of array of text.
+      Report Text: ${fileData}`,
+    });
+
+    res.json(response.text); // Send the response directly as JSON
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error generating content' });
+  }
+});
+
+app.post('/api/signIn', async (req, res) => {
+  console.log('Received Data:', req.body); // Log the received data
+  let { username, email, password } = req.body;
+  const user = await userModel.create({
+    name: username,
+    email: email,
+    password: password,
+  });
+
+  const token = jwt.sign({ id: user._id, email: user.email }, JWT_SECRET);
+
+  // #
+  res.cookie('authToken', token, { httpOnly: true }); // Use 'token' for both users and doctors
+
+  res.status(200).send({ message: 'Sign-in data received successfully' });
+});
+
+app.post('/api/logIn', async (req, res) => {
+  console.log('Received Data:', req.body); // Log the received data
+  let { email, password } = req.body;
+  const user = await userModel.findOne({ email: email, password: password });
+  if (!user) {
+    return res.status(401).send({ message: 'Invalid credentials' });
+  }
+
+  const token = jwt.sign({ id: user._id, email: user.email }, JWT_SECRET);
+
+  // #
+  res.cookie('authToken', token, { httpOnly: true }); // Use 'token' for both users and doctors
+
+  res.status(200).send({ message: 'Logged-in data received successfully' });
+});
+
+app.get('/api/home', async (req, res) => {
+  try {
+    const token = req.cookies.authToken; // Use 'token' for both users and doctors
+    if (!token) {
+      return res.status(401).send({ message: 'Unauthorized: No token provided' });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const user = await userModel
+    .findById(decoded.id)
+    .populate('reports')
+    .populate('doctors'); // <-- this is the missing piece
+    if (!user) {
+      return res.status(404).send({ message: 'User not found' });
+    }
+
+    const reports = user.reports.map(report => ({
+      ...report.toJSON(),
+      photo: report.photo ? `data:image/png;base64,${report.photo.toString('base64')}` : null
+    }));
+
+    res.status(200).send({
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        reports,
+        doctors: user.doctors,
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: 'Error in /api/home route', error });
+  }
+});
+
+app.post('/api/uploadReport', upload.single('report'), async (req, res) => {
+  try {
+    // Get the token from cookies
+    const token = req.cookies.authToken;
+    if (!token) {
+      return res.status(401).send({ message: 'Unauthorized: No token provided' });
+    }
+
+    // Verify token and decode user info
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const user = await userModel.findById(decoded.id);
+    if (!user) {
+      return res.status(404).send({ message: 'User not found' });
+    }
+
+    // The uploaded file is available in memory as a Buffer.
+    const photoBuffer = req.file.buffer;
+    console.log('Received file buffer of length:', photoBuffer.length);
+
+    // Process the image with Tesseract to extract text
+    Tesseract.recognize(photoBuffer, 'eng', {
+      logger: () => {} // Disable Tesseract logging
+    }).then(async ({ data: { text } }) => {
+      // Create a new report storing text, photo buffer, and auto-set date/time
+      const report = await reportModel.create({
+        text,
+        photo: photoBuffer  // Save the photo buffer directly in MongoDB
+        // dateTime is automatically set by the schema default
+      });
+
+      // Associate the created report with the user
+      user.reports.push(report._id);
+      await user.save();
+
+      res.status(200).send({ 
+        message: 'Report uploaded and processed successfully', 
+        reportId: report._id 
+      });
+    }).catch((err) => {
+      console.error('Tesseract error:', err);
+      res.status(500).send({ message: 'Error processing the report', error: err });
+    });
+  } catch (error) {
+    console.error('Error in /api/uploadReport route:', error);
+    res.status(500).send({ message: 'Error in /api/uploadReport route', error });
+  }
+});
+
+app.delete('/api/delete/:id', async (req, res) => {
+  try {
+    console.log('Received Data:', req.params); // Log the received data
+    await reportModel.findByIdAndDelete(req.params.id);
+    res.status(200).json({ message: 'Report deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting report:', error);
+    res.status(500).json({ message: 'Failed to delete report' });
+  }
+});
+
+app.get('/api/allDoctors', async (req, res) => {
+  try {
+    const doctors = await drModel.find();
+    res.status(200).json(doctors);
+  } catch (error) {
+    console.error('Error fetching doctors:', error);
+    res.status(500).json({ message: 'Failed to fetch doctors' });
+  }
+})
+
+app.post('/api/addDoc/:id', async (req, res) => {
+  try {
+    const token = req.cookies.authToken;
+    if (!token) {
+      return res.status(401).send({ message: 'Unauthorized: No token provided' });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    const user = await userModel.findById(decoded.id).populate('reports');
+    if (!user) {
+      return res.status(404).send({ message: 'User not found' });
+    }
+
+    const doctorId = req.params.id;
+    const doctor = await drModel.findById(doctorId);
+    if (!doctor) {
+      return res.status(404).send({ message: 'Doctor not found' });
+    }
+
+    // Add doctor to user's doctors list if not already there
+    if (!user.doctors.includes(doctorId)) {
+      user.doctors.push(doctorId);
+    }
+
+    // Add user to doctor's patients list if not already there
+    if (!doctor.patients.includes(user._id)) {
+      doctor.patients.push(user._id);
+    }
+
+    await user.save();
+    await doctor.save();
+
+    res.status(200).send({
+      message: 'Doctor added successfully',
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        reports: user.reports,
+        doctors: user.doctors,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: 'Error in /api/addDoc route', error });
+  }
+});
+
+
+// Dr
+
+app.post('/api/DrsignIn', async (req, res) => {
+  console.log('Received Data:', req.body); // Log the received data
+  let { username, email, password } = req.body;
+  const user = await drModel.create({
+    name: username,
+    email: email,
+    password: password,
+  });
+
+  const token = jwt.sign({ id: user._id, email: user.email }, JWT_SECRET);
+  res.cookie('token', token, { httpOnly: true }); // Use 'token' for both users and doctors
+  res.status(200).send({ message: 'Sign-in data received successfully' });
+})
+
+app.post('/api/DrlogIn', async (req, res) => {
+  try {
+    console.log('Received Data:', req.body); // Log the received data
+    let { email, password } = req.body;
+
+    // Find the doctor by email and password
+    const doctor = await drModel.findOne({ email: email, password: password });
+    if (!doctor) {
+      return res.status(401).send({ message: 'Invalid credentials' });
+    }
+
+    // Generate a JWT token for the doctor
+    const token = jwt.sign({ id: doctor._id, email: doctor.email }, JWT_SECRET);
+    res.cookie('token', token, { httpOnly: true }); // Use 'token' for both users and doctors
+
+    res.status(200).send({ message: 'Logged-in data received successfully' });
+  } catch (error) {
+    console.error('Error in /api/DrlogIn route:', error);
+    res.status(500).send({ message: 'Error in /api/DrlogIn route', error });
+  }
+});
+
+app.get('/api/DrHome', async (req, res) => {
+  try {
+    const token = req.cookies.token; // Use 'token' for both users and doctors
+    if (!token) {
+      return res.status(401).send({ message: 'Unauthorized: No token provided' });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const doctor = await drModel.findById(decoded.id).populate('patients');
+    if (!doctor) {
+      return res.status(404).send({ message: 'Doctor not found' });
+    }
+
+    const patients = doctor.patients.map(patient => ({
+      id: patient._id,
+      name: patient.name,
+      email: patient.email,
+      reports: patient.reports,
+    }));
+    console.log(doctor);
+    res.status(200).send({
+      doctor: {
+        id: doctor._id,
+        name: doctor.name,
+        email: doctor.email,
+        patients,
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: 'Error in /api/DrHome route', error });
+  }
+})
+
+app.listen(3000, () => {
+  console.log('Server is running on port 3000');
+});
+
+--------------------------------------------------------------------------------------------------------------------
+
+import React, { createContext, useState, useEffect } from 'react';
+import axios from 'axios';
+
+export const ReportsContext = createContext();
+
+const UserContextProvider = ({ children }) => {
+    const [reports, setReports] = useState(null);
+    const [userData, setUserData] = useState(null);
+
+    useEffect(() => {
+        // === change starts here ===
+        // Read authToken from cookies instead of localStorage
+        const cookieStr = document.cookie; 
+        const token = cookieStr
+          .split('; ')
+          .find(row => row.startsWith('authToken='))
+          ?.split('=')[1];
+        // === change ends here ===
+
+        // Fetch reports from /api/genAI
+        axios.get('/api/genAI', { headers: { Authorization: `Bearer ${token}` } })
+            .then(response => {
+                setReports(response.data);
+            })
+            .catch(error => {
+                console.error('Error fetching reports:', error);
+            });
+
+        // Fetch user data from /api/home
+        axios.get('/api/home', { headers: { Authorization: `Bearer ${token}` } })
+            .then(response => {
+                setUserData(response.data.user);
+            })
+            .catch(error => {
+                console.error('Error fetching user data:', error);
+            });
+    }, []);
+
+    return (
+        <ReportsContext.Provider value={{ reports, userData, doctors: userData?.doctors || [] }}>
+            {children}
+        </ReportsContext.Provider>
+    );
+};
+
+export default UserContextProvider;
+
+--------------------------------------------------------------------------------------------------------------------
+
+import React, { createContext, useState, useEffect } from 'react';
+import axios from 'axios';
+
+const DrContext = createContext();
+
+export const DrProvider = ({ children }) => {
+    const [doctorData, setDoctorData] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+        const fetchDoctorData = async () => {
+            // === change starts here ===
+            // Read the JWT from the cookie named "token"
+            const cookieStr = document.cookie;
+            const token = cookieStr
+              .split('; ')
+              .find(row => row.startsWith('token='))
+              ?.split('=')[1];
+            // === change ends here ===
+
+            await axios.get('/api/DrHome', {
+                headers: { Authorization: `Bearer ${token}` }
+            })
+            .then(response => {
+                setDoctorData(response.data);
+                setLoading(false);
+            })
+            .catch(err => {
+                setError(err);
+                setLoading(false);
+            });
+        };
+        fetchDoctorData();
+    }, []);
+
+    return (
+        <DrContext.Provider value={{ doctorData, loading, error }}>
+            {children}
+        </DrContext.Provider>
+    );
+};
+
+export const useDrContext = () => React.useContext(DrContext);
+
+export default DrContext;
+
+--------------------------------------------------------------------------------------------------------------------
