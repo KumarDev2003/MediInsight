@@ -1,3 +1,4 @@
+require('dotenv').config(); // Load environment variables
 const express = require('express');
 const app = express();
 
@@ -15,9 +16,9 @@ const pdf2img = require('pdf-poppler'); // Import pdf-poppler for PDF to image c
 
 const drModel = require('./models/drModel'); // Import the doctor model
 
-const JWT_SECRET = 'simple_secret_key'; // Hardcoded secret for simplicity
+const JWT_SECRET = process.env.JWT_SECRET; // Use JWT secret from .env
 
-const genAI = new GoogleGenAI({ apiKey: "AIzaSyC9zcPnEx6kHVhyn2jEzJtAd4spFMq83iI" });
+const genAI = new GoogleGenAI({ apiKey: process.env.GOOGLE_AI_API_KEY }); // Use API key from .env
 
 const _dirname = path.resolve(); 
 
@@ -57,7 +58,6 @@ app.get('/getInfo', async (req, res) => {
     Tesseract.recognize(imagePath, 'eng', {
       logger: () => {} // Disable logging to the terminal
     }).then(async ({ data: { text } }) => {
-      console.log(text);
       const report = await reportModel.create({ text }); // Create a new report
       user.reports.push(report._id); // Add the report ID to the user's reports field
       await user.save(); // Save the updated user document
@@ -136,32 +136,25 @@ app.get('/getInfo', async (req, res) => {
 // 3 attempt
 app.get('/api/genAI', async (req, res) => {
   try {
-    console.log('Request received at /api/genAI');
 
     const token = req.cookies.authToken;
-    console.log('Cookies:', req.cookies);
 
     if (!token) {
       console.warn('No token provided in cookies.');
       return res.status(401).send({ message: 'Unauthorized: No token provided' });
     }
 
-    console.log('Extracted token:', token);
     const decoded = jwt.verify(token, JWT_SECRET);
-    console.log('Decoded token:', decoded);
 
     const user = await userModel.findById(decoded.id);
     if (!user) {
       console.warn('User not found for ID:', decoded.id);
       return res.status(404).send({ message: 'User not found' });
     }
-    console.log('Fetched user data:', user);
 
     const reports = await reportModel.find({ _id: { $in: user.reports } });
-    console.log('Fetched reports:', reports);
 
     const fileData = reports.map(r => r.text).join(' ');
-    console.log('Concatenated report text length:', fileData.length);
 
     if (!fileData) {
       console.warn('No report text available for analysis.');
@@ -187,7 +180,6 @@ Report Text: ${fileData}`;
           model: 'gemini-2.0-flash-001',
           contents: prompt,
         });
-        console.log(`genAI response on attempt ${attempt}:`, aiResponse.text);
 
         // If we got valid text, break out
         if (aiResponse && aiResponse.text) {
@@ -209,7 +201,6 @@ Report Text: ${fileData}`;
 
     // Success: send back the AI’s JSON text
     res.json(aiResponse.text);
-    console.log('Response sent successfully.');
     
   } catch (error) {
     console.error('Error in /api/genAI route:', error);
@@ -484,7 +475,6 @@ app.post('/api/uploadPdf', upload.single('pdf'), async (req, res) => {
 // Report deletion ke liye hai
 app.delete('/api/delete/:id', async (req, res) => {
   try {
-    console.log('Received Data:', req.params); // Log the received data
     await reportModel.findByIdAndDelete(req.params.id);
     res.status(200).json({ message: 'Report deleted successfully' });
   } catch (error) {
@@ -598,7 +588,6 @@ app.post('/api/mediDecode', upload.single('image'), async (req, res) => {
     Tesseract.recognize(imageBuffer, 'eng', {
       logger: () => {}, // Disable logging
     }).then(async ({ data: { text } }) => {
-      console.log('Extracted Text:', text);
 
       // Generate response using genAI
       const response = await genAI.models.generateContent({
@@ -632,7 +621,6 @@ app.post('/api/mediDecode', upload.single('image'), async (req, res) => {
         15. **food_suggestions**: Any food or drink for health benefits or to avoid while taking the medicine.`,
       });
 
-      console.log('Generated Response:', response.text);
       res.status(200).send({ analysis: response.text });
     }).catch((err) => {
       console.error('Tesseract error:', err);
@@ -656,7 +644,6 @@ app.post('/api/prescriptionDecode', upload.single('image'), async (req, res) => 
     Tesseract.recognize(imageBuffer, 'eng', {
       logger: () => {}, // Disable logging
     }).then(async ({ data: { text } }) => {
-      console.log('Extracted Text:', text);
 
       // Generate response using genAI
       const response = await genAI.models.generateContent({
@@ -667,7 +654,6 @@ app.post('/api/prescriptionDecode', upload.single('image'), async (req, res) => 
         “${text}”`,
       });
 
-      console.log('Generated Response:', response.text);
       res.status(200).send({ analysis: response.text });
     }).catch((err) => {
       console.error('Tesseract error:', err);
@@ -682,7 +668,6 @@ app.post('/api/prescriptionDecode', upload.single('image'), async (req, res) => 
 // Dr
 
 app.post('/api/DrsignIn', async (req, res) => {
-  console.log('Received Data:', req.body); // Log the received data
   let { username, email, password } = req.body;
   const user = await drModel.create({
     name: username,
@@ -697,7 +682,6 @@ app.post('/api/DrsignIn', async (req, res) => {
 
 app.post('/api/DrlogIn', async (req, res) => {
   try {
-    console.log('Received Data:', req.body); // Log the received data
     let { email, password } = req.body;
 
     // Find the doctor by email and password
@@ -719,9 +703,7 @@ app.post('/api/DrlogIn', async (req, res) => {
 
 app.get('/api/DrHome', async (req, res) => {
   try {
-    console.log('Cookies:', req.cookies); // Log cookies for debugging
     const token = req.cookies.token; // Use 'token' for both users and doctors
-    console.log('Extracted token:', token); // Log the extracted token
 
     if (!token) {
       console.warn('No token provided in cookies.');
@@ -729,7 +711,6 @@ app.get('/api/DrHome', async (req, res) => {
     }
 
     const decoded = jwt.verify(token, JWT_SECRET);
-    console.log('Decoded token:', decoded); // Log decoded token data
 
     const doctor = await drModel.findById(decoded.id).populate('patients');
     if (!doctor) {
@@ -737,16 +718,12 @@ app.get('/api/DrHome', async (req, res) => {
       return res.status(404).send({ message: 'Doctor not found' });
     }
 
-    console.log('Doctor data:', doctor); // Log the doctor data
-
     const patients = doctor.patients.map(patient => ({
       id: patient._id,
       name: patient.name,
       email: patient.email,
       reports: patient.reports,
     }));
-
-    console.log('Patients data:', patients); // Log the patients data
 
     res.status(200).send({
       doctor: {
@@ -902,32 +879,25 @@ app.get('/api/reports/:id', async (req, res) => {
 // 5 attempt
 app.get('/api/reportAnalysis/:id', async (req, res) => {
   try {
-    console.log('Request received at /api/reportAnalysis/:id');
 
     const token = req.cookies.token;
-    console.log('Cookies:', req.cookies);
 
     if (!token) {
       console.warn('No token provided in cookies.');
       return res.status(401).send({ message: 'Unauthorized: No token provided' });
     }
-    console.log('Extracted token:', token);
 
     const decoded = jwt.verify(token, JWT_SECRET);
-    console.log('Decoded token:', decoded);
 
     const patientId = req.params.id;
-    console.log('Fetching patient with ID:', patientId);
 
     const patient = await userModel.findById(patientId).populate('reports');
     if (!patient) {
       console.warn('Patient not found for ID:', patientId);
       return res.status(404).send({ message: 'Patient not found' });
     }
-    console.log('Fetched patient data:', patient);
 
     const reportText = patient.reports.map(r => r.text).join(' ');
-    console.log('Concatenated report text length:', reportText.length);
 
     if (!reportText) {
       console.warn('No report text available for analysis.');
@@ -951,7 +921,6 @@ Report Text: ${reportText}`;
           model: 'gemini-2.0-flash-001',
           contents: prompt,
         });
-        console.log(`genAI response on attempt ${attempt}:`, aiResponse.text);
 
         if (aiResponse && aiResponse.text) {
           break;
@@ -971,7 +940,6 @@ Report Text: ${reportText}`;
 
     // Clean and parse the JSON
     const cleaned = cleanJSON(aiResponse.text);
-    console.log('Cleaned genAI response:', cleaned);
 
     let parsed;
     try {
@@ -981,7 +949,6 @@ Report Text: ${reportText}`;
       return res.status(500).send({ message: 'Error parsing genAI response', error: parseError });
     }
 
-    console.log('Parsed genAI response:', parsed);
     res.status(200).send({
       message: 'Report analysis generated successfully',
       reportAnalysis: parsed,
@@ -1030,6 +997,8 @@ app.get(/.*/, (req, res) => {
   res.sendFile(path.join(projectRoot, 'Frontend', 'dist', 'index.html'));
 });
 
-app.listen(3000, () => {
-  console.log('Server is running on port 3000');
+const PORT = process.env.PORT || 3000; // Use dynamic port from environment variable or default to 3000
+
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
 });
