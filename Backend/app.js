@@ -36,6 +36,7 @@ app.use(cookieParser());    // Parse cookies
 // Configure Multer to use memory storage (files remain in memory and not saved to disk)
 const upload = multer({ storage: multer.memoryStorage() });
 
+console.log(`Platform: ${process.platform}`); // Debug log to identify the platform
 
 // app.get('/', (req, res) => {
 //   res.redirect('/sign-in'); 
