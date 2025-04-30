@@ -1,11 +1,14 @@
 const mongoose = require('mongoose');
+require('dotenv').config();
 
-mongoose.connect('mongodb://localhost:27017/MediInsight');
+mongoose.connect(process.env.MONGODB_URI)
+    .then(() => console.log("Connected to MongoDB successfully")) // Log on successful connection
+    .catch(err => console.error("MongoDB connection error:", err)); // Log on connection error
 
 const userSchema = new mongoose.Schema({
-    name: {
+    name: { 
         type: String,
-    },
+    }, 
     email: {
         type: String,
     },
