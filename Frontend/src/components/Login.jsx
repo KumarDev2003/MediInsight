@@ -24,7 +24,6 @@ const Login = () => {
         },
         withCredentials: true            // ← accept the Set-Cookie header
       });
-      console.log('Response:', response.data);
       setFormData({ email: '', password: '' }); // Reset form values
       navigate('/'); // Redirect to Home
     } catch (error) {

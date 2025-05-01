@@ -12,7 +12,6 @@ const userModel = require('./models/userModel');
 const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
-const pdf2img = require('pdf-poppler'); // Import pdf-poppler for PDF to image conversion
 const pdfParse = require('pdf-parse'); // Import pdf-parse for PDF text extraction
 
 const drModel = require('./models/drModel'); // Import the doctor model
@@ -36,8 +35,6 @@ app.use(cookieParser());    // Parse cookies
 
 // Configure Multer to use memory storage (files remain in memory and not saved to disk)
 const upload = multer({ storage: multer.memoryStorage() });
-
-console.log(`Platform: ${process.platform}`); // Debug log to identify the platform
 
 // app.get('/', (req, res) => {
 //   res.redirect('/sign-in'); 
@@ -77,7 +74,6 @@ app.get('/getInfo', async (req, res) => {
 // 3 attempt
 app.get('/api/genAI', async (req, res) => {
   try {
-
     const token = req.cookies.authToken;
 
     if (!token) {
@@ -134,15 +130,13 @@ Report Text: ${fileData}`;
 
     // After 5 attempts, if still no valid response
     if (!aiResponse || !aiResponse.text) {
-      console.error('genAI did not respond after 3 attempts.');
+      console.error('genAI did not respond after 5 attempts.');
       return res
         .status(502)
         .json({ error: 'genAI did not respond after multiple attempts. Please try again later.' });
     }
 
-    // Success: send back the AI’s JSON text
     res.json(aiResponse.text);
-    
   } catch (error) {
     console.error('Error in /api/genAI route:', error);
     res.status(500).json({ error: 'Error generating content' });
@@ -208,7 +202,8 @@ app.get('/api/home', async (req, res) => {
 
     const reports = user.reports.map(report => ({
       ...report.toJSON(),
-      photo: report.photo ? `data:image/png;base64,${report.photo.toString('base64')}` : null
+      photo: report.photo ? `data:image/png;base64,${report.photo.toString('base64')}` : null,
+      fileData: report.fileData ? `data:application/pdf;base64,${report.fileData.toString('base64')}` : null
     }));
 
     res.status(200).send({
@@ -229,20 +224,17 @@ app.get('/api/home', async (req, res) => {
 
 app.post('/api/uploadReport', upload.single('report'), async (req, res) => {
   try {
-    // Get the token from cookies
     const token = req.cookies.authToken;
     if (!token) {
       return res.status(401).send({ message: 'Unauthorized: No token provided' });
     }
 
-    // Verify token and decode user info
     const decoded = jwt.verify(token, JWT_SECRET);
     const user = await userModel.findById(decoded.id);
     if (!user) {
       return res.status(404).send({ message: 'User not found' });
     }
 
-    // Validate if a file is uploaded
     if (!req.file) {
       return res.status(400).send({ message: 'No file uploaded' });
     }
@@ -250,13 +242,9 @@ app.post('/api/uploadReport', upload.single('report'), async (req, res) => {
     const mimeType = req.file.mimetype;
 
     if (mimeType === 'application/pdf') {
-      // Handle PDF upload
       const pdfBuffer = req.file.buffer;
-
-      // Extract text from the PDF
       const pdfData = await pdfParse(pdfBuffer);
 
-      // Create a new PDF document in the database
       const pdfDoc = await reportModel.create({
         fileName: req.file.originalname,
         fileData: pdfBuffer,
@@ -271,7 +259,6 @@ app.post('/api/uploadReport', upload.single('report'), async (req, res) => {
         reportId: pdfDoc._id,
       });
     } else if (mimeType.startsWith('image/')) {
-      // Handle image upload
       const photoBuffer = req.file.buffer;
 
       const { data: { text } } = await Tesseract.recognize(photoBuffer, 'eng', {
@@ -656,11 +643,11 @@ app.get('/api/reports/:id', async (req, res) => {
 
     // Convert photo and fileData buffers to Base64 strings for each report
     const reports = patient.reports.map((report) => {
-      console.log(`Processing report ID: ${report._id}`); // Debug report ID
+      const obj = report.toObject(); // Ensure buffers aren’t stripped
       return {
-        ...report.toJSON(),
-        photo: report.photo ? report.photo.toString('base64') : null,
-        fileData: report.fileData ? report.fileData.toString('base64') : null, // Ensure fileData is included
+        ...obj,
+        photo: obj.photo ? obj.photo.toString('base64') : null,
+        fileData: obj.fileData ? obj.fileData.toString('base64') : null, // Ensure fileData is properly encoded
       };
     });
 

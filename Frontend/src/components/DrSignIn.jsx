@@ -23,7 +23,6 @@ const DrSignIn = () => {
           'Content-Type': 'application/json'
         }
       });
-      console.log('DrSignIn:', response.data);
       setFormData({ username: '', email: '', password: '' }); // Reset form values
       navigate('/DrHome'); // Redirect to Home
     } catch (error) {

@@ -14,7 +14,6 @@ const DocReportAnalysis = () => {
         const response = await axios.get(`/api/reportAnalysis/${id}`, {
           withCredentials: true        // ← send your authToken cookie
         });
-        console.log('Fetched report analysis:', response.data);
         setReportAnalysis(response.data.reportAnalysis || {});
       } catch (err) {
         console.error('Error fetching report analysis:', err);

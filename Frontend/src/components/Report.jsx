@@ -5,8 +5,6 @@ import NavBar from './NavBar';
 const Report = () => {
   let { reports } = useContext(ReportsContext);
 
-  console.log('Reports from context:', reports); // Log reports from context
-
   if (!reports) {
     return (
       <div className="p-5">
@@ -20,7 +18,6 @@ const Report = () => {
   if (typeof reports === 'string') {
     try {
       const cleanedReports = cleanJSON(reports);
-      console.log('Cleaned reports:', cleanedReports); // Log cleaned reports
       reports = JSON.parse(cleanedReports);
     } catch (error) {
       console.error('Error parsing reports:', error);
@@ -32,8 +29,6 @@ const Report = () => {
       );
     }
   }
-
-  console.log('Parsed reports:', reports); // Log parsed reports
 
   // Check if the reports object contains any keys with data
   const reportSections = Object.entries(reports).filter(([key, value]) => Array.isArray(value) && value.length > 0);

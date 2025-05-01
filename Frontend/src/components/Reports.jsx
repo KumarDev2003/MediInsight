@@ -11,12 +11,15 @@ const Reports = () => {
   useEffect(() => {
     const fetchReports = async () => {
       try {
-        console.log('Fetching reports for patient ID:', id); // Debug patient ID
         const response = await axios.get(`/api/reports/${id}`);
-        console.log('Fetched reports:', response.data.reports); // Debug fetched reports
         setReports(response.data.reports);
       } catch (error) {
-        console.error('Error fetching reports:', error);
+        if (error.response && error.response.status === 401) {
+          console.error('Unauthorized: Redirecting to login.');
+          window.location.href = '/login'; // Redirect to login page
+        } else {
+          console.error('Error fetching reports:', error);
+        }
       }
     };
 
@@ -25,7 +28,6 @@ const Reports = () => {
 
   const handleViewPhoto = (photoBase64) => {
     if (photoBase64) {
-      console.log('Viewing photo with Base64 data:', photoBase64); // Debug photo Base64 data
       const photoUrl = `data:image/png;base64,${photoBase64}`;
       setSelectedPhoto(photoUrl);
     } else {
@@ -35,7 +37,6 @@ const Reports = () => {
 
   const handleViewPdf = (pdfBase64) => {
     if (pdfBase64) {
-      console.log('Viewing PDF with Base64 data:', pdfBase64.substring(0, 100)); // Log first 100 characters of Base64 data
       const pdfUrl = `data:application/pdf;base64,${pdfBase64}`;
       setSelectedPdf(pdfUrl);
     } else {
@@ -43,22 +44,17 @@ const Reports = () => {
     }
   };
 
-  // Test with a sample Base64 string
-  useEffect(() => {
-    const samplePdfBase64 = 'JVBERi0xLjQKJcTl8uXrp/Og0MTGCjEgMCBvYmoKPDwvTGluZWFyaXplZCAxL0wgMjE0NzgvTyAyL0UgMTAzMzgvTiAxL1QgMjA5NjgvSCBbIDYzNiAxMjZdPj4KZW5kb2JqCjIgMCBvYmoKPDwvQ3JlYXRvciAoQWRvYmUgQWNyb2JhdCBQcm9mZXNzaW9uYWwpL1Byb2R1Y2VyIChBZG9iZSBQREYgTGl...' // Truncated Base64 string
-    handleViewPdf(samplePdfBase64);
-  }, []);
-
   const handleDownloadPdf = (pdfBase64, reportId) => {
     if (pdfBase64) {
-      console.log('Downloading PDF for report ID:', reportId);
-      const pdfUrl = `data:application/pdf;base64,${pdfBase64}`;
+      const pdfBlob = new Blob([Uint8Array.from(atob(pdfBase64), c => c.charCodeAt(0))], { type: 'application/pdf' });
+      const pdfUrl = URL.createObjectURL(pdfBlob);
       const link = document.createElement('a');
       link.href = pdfUrl;
       link.download = `report-${reportId}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      URL.revokeObjectURL(pdfUrl); // Clean up the object URL
     } else {
       console.warn('No PDF data available to download.');
     }
@@ -85,7 +81,7 @@ const Reports = () => {
               <p>ID: {report._id}</p>
               <div className="flex justify-between">
                 <div className="flex gap-5 mt-2">
-                  {report.photo && (
+                  {report.photo ? (
                     <>
                       <button
                         onClick={() => handleViewPhoto(report.photo)}
@@ -101,8 +97,10 @@ const Reports = () => {
                         Download Photo
                       </a>
                     </>
+                  ) : (
+                    <p className="text-gray-500">No photo available</p>
                   )}
-                  {report.fileData && (
+                  {report.fileData ? (
                     <>
                       <button
                         onClick={() => handleViewPdf(report.fileData)}
@@ -117,6 +115,8 @@ const Reports = () => {
                         Download PDF
                       </button>
                     </>
+                  ) : (
+                    <p className="text-gray-500">No PDF available</p>
                   )}
                 </div>
               </div>

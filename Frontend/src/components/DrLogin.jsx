@@ -22,7 +22,6 @@ const DrLogin = () => {
           'Content-Type': 'application/json'
         }
       });
-      console.log('Response:', response.data);
       setFormData({ email: '', password: '' }); // Reset form values
       navigate('/DrHome'); // Redirect to Home
     } catch (error) {

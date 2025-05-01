@@ -29,7 +29,6 @@ const UploadReport = () => {
         },
       });
       alert('Report uploaded successfully');
-      console.log('Response:', response.data);
     } catch (error) {
       console.error('Error uploading report:', error);
       alert('Failed to upload report');

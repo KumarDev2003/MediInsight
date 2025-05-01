@@ -51,6 +51,31 @@ const Home = () => {
     setSelectedPhoto(null);
   };
 
+  const handleViewPdf = (pdfBase64) => {
+    if (pdfBase64) {
+      const pdfUrl = pdfBase64; // Use the Base64 data directly
+      window.open(pdfUrl, '_blank'); // Open the PDF in a new tab
+    } else {
+      console.warn('No PDF data available to view.');
+    }
+  };
+
+  const handleDownloadPdf = (pdfBase64, reportId) => {
+    if (pdfBase64) {
+      const pdfBlob = new Blob([Uint8Array.from(atob(pdfBase64.split(',')[1]), c => c.charCodeAt(0))], { type: 'application/pdf' });
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      const link = document.createElement('a');
+      link.href = pdfUrl;
+      link.download = `report-${reportId}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(pdfUrl); // Clean up the object URL
+    } else {
+      console.warn('No PDF data available to download.');
+    }
+  };
+
   return (
     <div className='p-5'>
       <NavBar />
@@ -70,19 +95,39 @@ const Home = () => {
                 <p>ID: {report._id}</p>
                 <div className='flex justify-between mt-2'>
                   <div className="flex gap-5">
-                    <button
-                      onClick={() => handleViewPhoto(report.photo)}
-                      className="text-blue-600 underline"
-                    >
-                      View Photo
-                    </button>
-                    <a
-                      href={report.photo}
-                      download
-                      className="text-blue-600 underline"
-                    >
-                      Download Photo
-                    </a>
+                    {report.photo && (
+                      <>
+                        <button
+                          onClick={() => handleViewPhoto(report.photo)}
+                          className="text-blue-600 underline"
+                        >
+                          View Photo
+                        </button>
+                        <a
+                          href={report.photo}
+                          download={`report-${report._id}.png`}
+                          className="text-blue-600 underline"
+                        >
+                          Download Photo
+                        </a>
+                      </>
+                    )}
+                    {report.fileData && (
+                      <>
+                        <button
+                          onClick={() => handleViewPdf(report.fileData)}
+                          className="text-blue-600 underline"
+                        >
+                          View PDF
+                        </button>
+                        <button
+                          onClick={() => handleDownloadPdf(report.fileData, report._id)}
+                          className="text-blue-600 underline"
+                        >
+                          Download PDF
+                        </button>
+                      </>
+                    )}
                   </div>
                   <button
                     onClick={() => handleDelete(report._id)}

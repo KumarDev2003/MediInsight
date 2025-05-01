@@ -6,8 +6,6 @@ const MyDoctors = () => {
   const { doctors } = useContext(ReportsContext);
   const [searchTerm, setSearchTerm] = useState(''); // State for search input
 
-  console.log(doctors);
-
   const handleRemoveDoctor = async (doctorId) => {
     try {
       const response = await fetch(`/api/removeDoc/${doctorId}`, {
