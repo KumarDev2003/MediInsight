@@ -11,7 +11,7 @@ const DocReportAnalysis = () => {
   useEffect(() => {
     const fetchReportAnalysis = async () => {
       try {
-        const response = await axios.get(`/api/reportAnalysis/${id}`, {
+        const response = await axios.get(`https://mediinsight-tbka.onrender.com/api/reportAnalysis/${id}`, {
           withCredentials: true        // ← send your authToken cookie
         });
         setReportAnalysis(response.data.reportAnalysis || {});

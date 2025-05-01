@@ -12,7 +12,7 @@ const Home = () => {
 
   useEffect(() => {
     // 1️⃣ Check auth once on mount
-    axios.get('/api/home', { withCredentials: true })
+    axios.get('https://mediinsight-tbka.onrender.com/api/home', { withCredentials: true })
       .then(res => {
         if (!res.data.loggedIn) {
           // not logged in → bounce to sign-in
@@ -34,7 +34,7 @@ const Home = () => {
   // 3️⃣ From here on, we know we’re logged in:
   const handleDelete = async (id) => {
     try {
-      await axios.delete(`/api/delete/${id}`, { withCredentials: true });
+      await axios.delete(`https://mediinsight-tbka.onrender.com/api/delete/${id}`, { withCredentials: true });
       alert('Report deleted successfully.');
       navigate('/'); // reload the page
     } catch (err) {

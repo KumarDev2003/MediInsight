@@ -23,7 +23,7 @@ const UploadReport = () => {
     formData.append('report', file);
 
     try {
-      const response = await axios.post('/api/uploadReport', formData, {
+      const response = await axios.post('https://mediinsight-tbka.onrender.com/api/uploadReport', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },

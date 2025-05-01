@@ -11,7 +11,7 @@ const Reports = () => {
   useEffect(() => {
     const fetchReports = async () => {
       try {
-        const response = await axios.get(`/api/reports/${id}`);
+        const response = await axios.get(`https://mediinsight-tbka.onrender.com/api/reports/${id}`);
         setReports(response.data.reports);
       } catch (error) {
         if (error.response && error.response.status === 401) {

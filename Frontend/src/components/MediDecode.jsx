@@ -23,7 +23,7 @@ const MediDecode = () => {
     formData.append('image', selectedFile);
 
     try {
-      const response = await axios.post('/api/mediDecode', formData, {
+      const response = await axios.post('https://mediinsight-tbka.onrender.com/api/mediDecode', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 

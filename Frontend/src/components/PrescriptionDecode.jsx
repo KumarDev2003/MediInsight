@@ -25,7 +25,7 @@ const PrescriptionDecode = () => {
     formData.append('image', selectedFile);
 
     try {
-      const response = await axios.post('/api/prescriptionDecode', formData, {
+      const response = await axios.post('https://mediinsight-tbka.onrender.com/api/prescriptionDecode', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 

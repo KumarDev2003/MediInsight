@@ -22,7 +22,7 @@ const DrHome = () => {
 
     const handleRemovePatient = async (patientId) => {
         try {
-            const response = await axios.delete(`/api/removePatient/${patientId}`);
+            const response = await axios.delete(`https://mediinsight-tbka.onrender.com/api/removePatient/${patientId}`);
             if (response.status === 200) {
                 alert('Patient removed successfully.');
                 navigate('/DrHome'); // Navigate back to DrHome
@@ -34,7 +34,7 @@ const DrHome = () => {
     };
 
     const handleViewReports = (patientId) => {
-        navigate(`/reports/${patientId}`); // Navigate to the reports page for the selected patient
+        navigate(`https://mediinsight-tbka.onrender.com/reports/${patientId}`); // Navigate to the reports page for the selected patient
     }
 
     const handleReportAnalysis = (patientId) => {

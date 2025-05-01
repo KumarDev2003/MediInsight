@@ -21,7 +21,7 @@ export const DrProvider = ({ children }) => {
                     ?.split('=')[1];
 
 
-                const response = await axios.get('/api/DrHome', {
+                const response = await axios.get('https://mediinsight-tbka.onrender.com/api/DrHome', {
                     headers: { Authorization: `Bearer ${token}` },
                     withCredentials: true,
                 });

@@ -772,14 +772,8 @@ function cleanJSON(rawString) {
 // Serve static files from the frontend build directory
 app.use(express.static(path.join(_dirname, '/Frontend/dist')));
 
-// Catch-all route to handle other frontend routes
-// Compute your project root (MediInsight)
-const projectRoot = path.resolve(__dirname, '..');
-
-app.use('/', express.static(path.join(projectRoot, 'Frontend', 'dist')));
-
 app.get(/.*/, (req, res) => {
-  res.sendFile(path.join(projectRoot, 'Frontend', 'dist', 'index.html'));
+    res.sendFile(path.join(_dirname, '/Frontend/dist/index.html'));
 });
 
 const PORT = process.env.PORT || 3000; // Use dynamic port from environment variable or default to 3000
