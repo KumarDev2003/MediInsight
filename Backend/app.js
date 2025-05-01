@@ -13,6 +13,7 @@ const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const pdf2img = require('pdf-poppler'); // Import pdf-poppler for PDF to image conversion
+const pdfParse = require('pdf-parse'); // Import pdf-parse for PDF text extraction
 
 const drModel = require('./models/drModel'); // Import the doctor model
 
@@ -72,67 +73,6 @@ app.get('/getInfo', async (req, res) => {
     res.status(500).send({ message: 'Error in /getInfo route', error });
   }
 });
-
-// 1 attempt
-// app.get('/api/genAI', async (req, res) => {
-//   try {
-//     console.log('Request received at /api/genAI'); // Log route entry
-
-//     const token = req.cookies.authToken; // Get the token from cookies
-//     console.log('Cookies:', req.cookies); // Log cookies for debugging
-
-//     if (!token) {
-//       console.warn('No token provided in cookies.');
-//       return res.status(401).send({ message: 'Unauthorized: No token provided' });
-//     }
-
-//     console.log('Extracted token:', token); // Log the extracted token
-
-//     const decoded = jwt.verify(token, JWT_SECRET); // Verify the token
-//     console.log('Decoded token:', decoded); // Log decoded token data
-
-//     const user = await userModel.findById(decoded.id); // Find the logged-in user
-//     if (!user) {
-//       console.warn('User not found for ID:', decoded.id);
-//       return res.status(404).send({ message: 'User not found' });
-//     }
-
-//     console.log('Fetched user data:', user); // Log user data
-
-//     const reports = await reportModel.find({ _id: { $in: user.reports } }); // Find reports by IDs
-//     console.log('Fetched reports:', reports); // Log fetched reports
-
-//     const fileData = reports.map(report => report.text).join(' '); // Concatenate text from reports
-//     console.log('Concatenated report text:', fileData); // Log concatenated report text
-
-//     if (!fileData) {
-//       console.warn('No report text available for analysis.');
-//       return res.status(400).send({ message: 'No report text available for analysis' });
-//     }
-
-//     // Use genAI to generate report analysis
-//     console.log('Sending data to genAI for analysis...');
-//     const response = await genAI.models.generateContent({
-//       model: 'gemini-2.0-flash-001',
-//       contents: `You are a medical data analyst. Below is a detailed medical report containing lab results, diagnostic imaging findings, and clinical notes. 
-//       Please do the following:
-//        1. Summarize the key findings in clear bullet points.
-//        2. Identify any abnormal results or trends that indicate the patient's condition is either improving or worsening.
-//        3. Highlight any critical points that need immediate attention.
-//        4. Recommend potential follow-up actions or tests, if applicable.
-//        Note: Provide the data in json format & give all the four points in the form of array of text.
-//       Report Text: ${fileData}`,
-//     });
-
-//     console.log('genAI response:', response.text); // Log raw response from genAI
-
-//     res.json(response.text); // Send the response directly as JSON
-//     console.log('Response sent successfully.'); // Log successful response
-//   } catch (error) {
-//     console.error('Error in /api/genAI route:', error); // Log error details
-//     res.status(500).json({ error: 'Error generating content' });
-//   }
-// });
 
 // 3 attempt
 app.get('/api/genAI', async (req, res) => {
@@ -311,54 +251,24 @@ app.post('/api/uploadReport', upload.single('report'), async (req, res) => {
 
     if (mimeType === 'application/pdf') {
       // Handle PDF upload
-      const tempPdfPath = path.join(tempDir, `${Date.now()}-uploaded.pdf`);
-      fs.writeFileSync(tempPdfPath, req.file.buffer);
+      const pdfBuffer = req.file.buffer;
 
-      const outputDir = path.join(tempDir, `${Date.now()}-images`);
-      if (!fs.existsSync(outputDir)) {
-        fs.mkdirSync(outputDir, { recursive: true });
-      }
+      // Extract text from the PDF
+      const pdfData = await pdfParse(pdfBuffer);
 
-      const options = {
-        format: 'png',
-        out_dir: outputDir,
-        out_prefix: 'page',
-        page: null, // Convert all pages
-      };
+      // Create a new PDF document in the database
+      const pdfDoc = await reportModel.create({
+        fileName: req.file.originalname,
+        fileData: pdfBuffer,
+        text: pdfData.text,
+      });
 
-      await pdf2img.convert(tempPdfPath, options);
-
-      const imageFiles = fs.readdirSync(outputDir).filter(file => file.endsWith('.png'));
-      const reports = [];
-
-      for (const imageFile of imageFiles) {
-        const imagePath = path.join(outputDir, imageFile);
-        const imageBuffer = fs.readFileSync(imagePath);
-
-        // Extract text from the image using Tesseract
-        const { data: { text } } = await Tesseract.recognize(imageBuffer, 'eng', {
-          logger: () => {}, // Disable logging
-        });
-
-        // Create a new report storing text and image buffer
-        const report = await reportModel.create({
-          text,
-          photo: imageBuffer,
-        });
-
-        user.reports.push(report._id);
-        reports.push(report);
-      }
-
+      user.reports.push(pdfDoc._id);
       await user.save();
 
-      // Clean up temporary files
-      fs.unlinkSync(tempPdfPath);
-      fs.rmdirSync(outputDir, { recursive: true });
-
       return res.status(200).send({
-        message: 'PDF uploaded, converted to images, and processed successfully',
-        reportIds: reports.map(report => report._id),
+        message: 'PDF uploaded and processed successfully',
+        reportId: pdfDoc._id,
       });
     } else if (mimeType.startsWith('image/')) {
       // Handle image upload
@@ -414,58 +324,24 @@ app.post('/api/uploadPdf', upload.single('pdf'), async (req, res) => {
       return res.status(400).send({ message: 'Invalid file type. Only PDFs are allowed.' });
     }
 
-    // Save the uploaded PDF temporarily
-    const tempPdfPath = path.join(__dirname, 'temp', req.file.originalname);
-    fs.writeFileSync(tempPdfPath, req.file.buffer);
+    const pdfBuffer = req.file.buffer;
 
-    // Convert PDF to images
-    const outputDir = path.join(__dirname, 'temp', 'images');
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
-    }
+    // Extract text from the PDF
+    const pdfData = await pdfParse(pdfBuffer);
 
-    const options = {
-      format: 'png',
-      out_dir: outputDir,
-      out_prefix: path.basename(tempPdfPath, path.extname(tempPdfPath)),
-      page: null, // Convert all pages
-    };
+    // Create a new PDF document in the database
+    const pdfDoc = await reportModel.create({
+      fileName: req.file.originalname,
+      fileData: pdfBuffer,
+      text: pdfData.text,
+    });
 
-    await pdf2img.convert(tempPdfPath, options);
-
-    // Process each generated image
-    const imageFiles = fs.readdirSync(outputDir).filter(file => file.endsWith('.png'));
-    const reports = [];
-
-    for (const imageFile of imageFiles) {
-      const imagePath = path.join(outputDir, imageFile);
-      const imageBuffer = fs.readFileSync(imagePath);
-
-      // Extract text from the image using Tesseract
-      const { data: { text } } = await Tesseract.recognize(imageBuffer, 'eng', {
-        logger: () => {}, // Disable logging
-      });
-
-      // Create a new report storing text and image buffer
-      const report = await reportModel.create({
-        text,
-        photo: imageBuffer, // Save the image buffer directly in MongoDB
-      });
-
-      // Associate the created report with the user
-      user.reports.push(report._id);
-      reports.push(report);
-    }
-
+    user.reports.push(pdfDoc._id);
     await user.save();
 
-    // Clean up temporary files
-    fs.unlinkSync(tempPdfPath);
-    fs.rmdirSync(outputDir, { recursive: true });
-
     res.status(200).send({
-      message: 'PDF uploaded, converted to images, and processed successfully',
-      reportIds: reports.map(report => report._id),
+      message: 'PDF uploaded and processed successfully',
+      reportId: pdfDoc._id,
     });
   } catch (error) {
     console.error('Error in /api/uploadPdf route:', error);
@@ -778,104 +654,25 @@ app.get('/api/reports/:id', async (req, res) => {
       return res.status(404).send({ message: 'Patient not found' });
     }
 
-    // Convert photo buffer to Base64 string for each report
-    const reports = patient.reports.map((report) => ({
-      ...report.toJSON(),
-      photo: report.photo ? report.photo.toString('base64') : null,
-    }));
+    // Convert photo and fileData buffers to Base64 strings for each report
+    const reports = patient.reports.map((report) => {
+      console.log(`Processing report ID: ${report._id}`); // Debug report ID
+      return {
+        ...report.toJSON(),
+        photo: report.photo ? report.photo.toString('base64') : null,
+        fileData: report.fileData ? report.fileData.toString('base64') : null, // Ensure fileData is included
+      };
+    });
 
-    res.status(200).send({ 
-      message: 'Reports fetched successfully', 
-      reports 
+    res.status(200).send({
+      message: 'Reports fetched successfully',
+      reports,
     });
   } catch (error) {
     console.error('Error fetching reports:', error);
     res.status(500).send({ message: 'Error fetching reports', error });
   }
 });
-
-// Ye doctore ke liye hai
-
-// 1 attempt
-
-// app.get('/api/reportAnalysis/:id', async (req, res) => {
-//   try {
-//     console.log('Request received at /api/reportAnalysis/:id'); // Log route entry
-
-//     const token = req.cookies.token; // Get the token from cookies
-//     console.log('Cookies:', req.cookies); // Log cookies for debugging
-
-//     if (!token) {
-//       console.warn('No token provided in cookies.');
-//       return res.status(401).send({ message: 'Unauthorized: No token provided' });
-//     }
-
-//     console.log('Extracted token:', token); // Log the extracted token
-
-//     const decoded = jwt.verify(token, JWT_SECRET); // Verify the token
-//     console.log('Decoded token:', decoded); // Log decoded token data
-
-//     const patientId = req.params.id; // Use the patient ID from the URL
-//     console.log('Fetching patient with ID:', patientId);
-
-//     const patient = await userModel.findById(patientId).populate('reports'); // Fetch patient and populate reports
-//     if (!patient) {
-//       console.warn('Patient not found for ID:', patientId);
-//       return res.status(404).send({ message: 'Patient not found' });
-//     }
-
-//     console.log('Fetched patient data:', patient); // Log patient data
-
-//     // Concatenate all report texts into a single string
-//     const reportText = patient.reports.map(report => report.text).join(' ');
-//     console.log('Concatenated report text:', reportText); // Log concatenated report text
-
-//     if (!reportText) {
-//       console.warn('No report text available for analysis.');
-//       return res.status(400).send({ message: 'No report text available for analysis' });
-//     }
-
-//     // Use genAI to generate report analysis
-//     console.log('Sending data to genAI for analysis...');
-//     const response = await genAI.models.generateContent({
-//       model: 'gemini-2.0-flash-001',
-//       contents: `You are a medical data analyst. Below is a detailed medical report containing lab results, diagnostic imaging findings, and clinical notes. 
-//       Please do the following:
-//        1. Summarize the key findings in clear bullet points.
-//        2. Identify any abnormal results or trends that indicate the patient's condition is either improving or worsening.
-//        3. Highlight any critical points that need immediate attention.
-//        4. Recommend potential follow-up actions or tests, if applicable.
-//        Note: Provide the data in JSON format & give all the four points in the form of an array of text.
-//       Report Text: ${reportText}`,
-//     });
-
-//     console.log('genAI response:', response.text); // Log raw response from genAI
-
-//     // Clean the response by removing Markdown-style code block markers
-//     const cleanedResponse = cleanJSON(response.text);
-//     console.log('Cleaned genAI response:', cleanedResponse); // Log cleaned response
-
-//     let parsedResponse;
-//     try {
-//       parsedResponse = JSON.parse(cleanedResponse); // Parse the cleaned JSON response
-//     } catch (parseError) {
-//       console.error('Error parsing genAI response:', parseError);
-//       return res.status(500).send({ message: 'Error parsing genAI response', error: parseError });
-//     }
-
-//     console.log('Parsed genAI response:', parsedResponse); // Log parsed response
-
-//     res.status(200).send({
-//       message: 'Report analysis generated successfully',
-//       reportAnalysis: parsedResponse,
-//     });
-//     console.log('Response sent successfully.'); // Log successful response
-//   } catch (error) {
-//     console.error('Error in /api/reportAnalysis/:id route:', error); // Log error details
-//     res.status(500).send({ message: 'Error generating report analysis', error });
-//   }
-// });
-
 
 // 5 attempt
 app.get('/api/reportAnalysis/:id', async (req, res) => {
